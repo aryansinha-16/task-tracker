@@ -1,7 +1,7 @@
 """
 Remote MCP server for RK's task tracker.
 Transport: StreamableHTTP via FastMCP
-URL pattern: /mcp/<secret>
+URL: /mcp/<secret>   (secret-in-path auth; no OAuth)
 """
 
 import logging
@@ -11,6 +11,8 @@ from datetime import datetime, timezone, timedelta
 
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
@@ -25,6 +27,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 IST = timezone(timedelta(hours=5, minutes=30))
 MCP_SECRET = os.environ.get("MCP_SECRET", "")
+BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+if BASE_URL:
+    BASE_URL = f"https://{BASE_URL}"
 
 
 def now_ist() -> str:
@@ -124,29 +129,57 @@ def list_tasks(assignee: str = "") -> str:
     return "\n".join(lines).strip()
 
 
-# ── Starlette wrapper with secret-in-URL auth ─────────────────────────────────
+# ── Auth middleware (Bearer token) ────────────────────────────────────────────
 
-mcp_asgi = mcp.streamable_http_app()
+class BearerAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Let health and well-known through unauthenticated
+        if request.url.path in ("/health",) or request.url.path.startswith("/.well-known"):
+            return await call_next(request)
 
+        if MCP_SECRET:
+            auth = request.headers.get("Authorization", "")
+            token = auth.removeprefix("Bearer ").strip()
+            if token != MCP_SECRET:
+                return JSONResponse(
+                    {"error": "Unauthorized"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Bearer realm="task-tracker"'},
+                )
+        return await call_next(request)
+
+
+# ── Route handlers ────────────────────────────────────────────────────────────
 
 async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 
-async def check_secret(request: Request, call_next):
-    secret = request.path_params.get("secret", "")
-    if MCP_SECRET and secret != MCP_SECRET:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    return await call_next(request)
+async def oauth_protected_resource(request: Request):
+    """Tell clients this resource requires Bearer auth (no OAuth server)."""
+    mcp_url = f"{BASE_URL}/mcp" if BASE_URL else "/mcp"
+    return JSONResponse({
+        "resource": mcp_url,
+        "bearer_methods_supported": ["header"],
+    })
 
 
-async def mcp_handler(scope, receive, send):
-    await mcp_asgi(scope, receive, send)
+async def oauth_authorization_server(request: Request):
+    """Return 404-style response — we don't have an OAuth server."""
+    return JSONResponse({"error": "not_supported"}, status_code=404)
 
+
+# ── App assembly ──────────────────────────────────────────────────────────────
+
+mcp_asgi = mcp.streamable_http_app()
 
 app = Starlette(
+    middleware=[Middleware(BearerAuthMiddleware)],
     routes=[
         Route("/health", health),
-        Mount(f"/mcp/{MCP_SECRET}", app=mcp_asgi),
-    ]
+        Route("/.well-known/oauth-protected-resource", oauth_protected_resource),
+        Route("/.well-known/oauth-protected-resource/{path:path}", oauth_protected_resource),
+        Route("/.well-known/oauth-authorization-server", oauth_authorization_server),
+        Mount("/mcp", app=mcp_asgi),
+    ],
 )
