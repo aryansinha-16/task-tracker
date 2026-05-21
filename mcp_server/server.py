@@ -244,18 +244,16 @@ def health():
 _sse_queues: dict[str, asyncio.Queue] = {}
 
 
-@app.get("/sse")
-async def sse_endpoint(request: Request, _=Depends(verify_auth)):
+async def _sse_stream(request: Request) -> StreamingResponse:
     client_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue()
     _sse_queues[client_id] = queue
 
-    # Tell the client which endpoint to POST messages to
-    endpoint_url = str(request.base_url).rstrip("/") + f"/message?client_id={client_id}"
+    base = str(request.base_url).rstrip("/")
+    endpoint_url = base + f"/message?client_id={client_id}"
 
     async def event_stream():
         try:
-            # First event: tell Claude.ai where to POST
             yield f"event: endpoint\ndata: {endpoint_url}\n\n"
             while True:
                 if await request.is_disconnected():
@@ -264,24 +262,46 @@ async def sse_endpoint(request: Request, _=Depends(verify_auth)):
                     msg = await asyncio.wait_for(queue.get(), timeout=25)
                     yield f"event: message\ndata: {json.dumps(msg)}\n\n"
                 except asyncio.TimeoutError:
-                    yield ": ping\n\n"  # keep-alive
+                    yield ": ping\n\n"
         finally:
             _sse_queues.pop(client_id, None)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# Message endpoint — Claude.ai POSTs JSON-RPC requests here.
-@app.post("/message")
-async def message_endpoint(request: Request, client_id: str, _=Depends(verify_auth)):
+async def _handle_message(request: Request, client_id: str) -> Response:
     body = await request.json()
     response = handle_mcp(body)
-
     queue = _sse_queues.get(client_id)
     if response is not None and queue:
         await queue.put(response)
-
     return Response(status_code=202)
+
+
+# Bearer-token auth routes
+@app.get("/sse")
+async def sse_endpoint(request: Request, _=Depends(verify_auth)):
+    return await _sse_stream(request)
+
+
+@app.post("/message")
+async def message_endpoint(request: Request, client_id: str, _=Depends(verify_auth)):
+    return await _handle_message(request, client_id)
+
+
+# Secret-in-URL routes: /mcp/<secret>/sse and /mcp/<secret>/message
+@app.get("/mcp/{secret}/sse")
+async def sse_endpoint_secret(secret: str, request: Request):
+    if MCP_SECRET and secret != MCP_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return await _sse_stream(request)
+
+
+@app.post("/mcp/{secret}/message")
+async def message_endpoint_secret(secret: str, request: Request, client_id: str):
+    if MCP_SECRET and secret != MCP_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return await _handle_message(request, client_id)
 
 
 if __name__ == "__main__":
