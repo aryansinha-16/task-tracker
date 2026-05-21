@@ -1,7 +1,7 @@
 """
 Remote MCP server for RK's task tracker.
-Transport: StreamableHTTP (POST /mcp/<secret>)
-Compatible with Claude.ai desktop and web integrations.
+Transport: StreamableHTTP via FastMCP
+URL pattern: /mcp/<secret>
 """
 
 import logging
@@ -9,14 +9,11 @@ import os
 import uuid
 from datetime import datetime, timezone, timedelta
 
+from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
-
-from mcp.server import Server
-from mcp.server.streamable_http import StreamableHTTPServerTransport
-from mcp.types import Tool, TextContent
 
 try:
     from sheets import append_task, update_task_status, list_open_tasks
@@ -34,12 +31,17 @@ def now_ist() -> str:
     return datetime.now(IST).strftime("%Y-%m-%d")
 
 
-# ── Tool implementations ─────────────────────────────────────────────────────
+# ── FastMCP server ────────────────────────────────────────────────────────────
 
-def add_task(args: dict) -> str:
-    assignee = args.get("assignee", "").strip()
-    description = args.get("description", "").strip()
-    due_date = args.get("due_date", "").strip()
+mcp = FastMCP("task-tracker")
+
+
+@mcp.tool()
+def add_task(assignee: str, description: str, due_date: str = "") -> str:
+    """Log a new task assigned by RK to a direct report. Call this whenever RK says he told someone to do something."""
+    assignee = assignee.strip()
+    description = description.strip()
+    due_date = due_date.strip()
 
     if not assignee or not description:
         raise ValueError("assignee and description are required.")
@@ -67,8 +69,10 @@ def add_task(args: dict) -> str:
     )
 
 
-def close_task(args: dict) -> str:
-    identifier = args.get("task_id", "").strip() or args.get("description_hint", "").strip()
+@mcp.tool()
+def close_task(task_id: str = "", description_hint: str = "") -> str:
+    """Mark a task as closed when RK says someone has completed their work."""
+    identifier = task_id.strip() or description_hint.strip()
     if not identifier:
         raise ValueError("Provide task_id or description_hint.")
 
@@ -86,8 +90,10 @@ def close_task(args: dict) -> str:
     )
 
 
-def list_tasks(args: dict) -> str:
-    assignee_filter = args.get("assignee", "").strip().lower()
+@mcp.tool()
+def list_tasks(assignee: str = "") -> str:
+    """Show all open tasks, grouped by assignee. Optionally filter by one person."""
+    assignee_filter = assignee.strip().lower()
     tasks = list_open_tasks()
 
     if assignee_filter:
@@ -118,86 +124,29 @@ def list_tasks(args: dict) -> str:
     return "\n".join(lines).strip()
 
 
-# ── MCP Server ───────────────────────────────────────────────────────────────
+# ── Starlette wrapper with secret-in-URL auth ─────────────────────────────────
 
-def make_mcp_server() -> Server:
-    server = Server("task-tracker")
-
-    @server.list_tools()
-    async def handle_list_tools() -> list[Tool]:
-        return [
-            Tool(
-                name="add_task",
-                description="Log a new task assigned by RK to a direct report. Call this whenever RK says he told someone to do something.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "assignee": {"type": "string", "description": "First name of the assignee (e.g. Mahendra, Mali, Rehan)."},
-                        "description": {"type": "string", "description": "What the person needs to do."},
-                        "due_date": {"type": "string", "description": "Optional due date in YYYY-MM-DD format."},
-                    },
-                    "required": ["assignee", "description"],
-                },
-            ),
-            Tool(
-                name="close_task",
-                description="Mark a task as closed when RK says someone has completed their work.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string", "description": "8-character task ID if known."},
-                        "description_hint": {"type": "string", "description": "Keyword from the task description to find it."},
-                    },
-                },
-            ),
-            Tool(
-                name="list_tasks",
-                description="Show all open tasks, grouped by assignee. Optionally filter by one person.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "assignee": {"type": "string", "description": "Filter by first name. Leave blank for everyone."},
-                    },
-                },
-            ),
-        ]
-
-    @server.call_tool()
-    async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
-        if name == "add_task":
-            result = add_task(arguments)
-        elif name == "close_task":
-            result = close_task(arguments)
-        elif name == "list_tasks":
-            result = list_tasks(arguments)
-        else:
-            raise ValueError(f"Unknown tool: {name}")
-        return [TextContent(type="text", text=result)]
-
-    return server
-
-
-# ── Starlette app ─────────────────────────────────────────────────────────────
-
-async def handle_mcp(request: Request) -> None:
-    secret = request.path_params.get("secret", "")
-    if MCP_SECRET and secret != MCP_SECRET:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    mcp_server = make_mcp_server()
-    transport = StreamableHTTPServerTransport(mcp_path=f"/mcp/{secret}")
-
-    async with mcp_server.run_with_transport(transport) as (read_stream, write_stream):
-        await transport.handle_request(request.scope, request.receive, request._send)
+mcp_asgi = mcp.streamable_http_app()
 
 
 async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 
+async def check_secret(request: Request, call_next):
+    secret = request.path_params.get("secret", "")
+    if MCP_SECRET and secret != MCP_SECRET:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+async def mcp_handler(scope, receive, send):
+    await mcp_asgi(scope, receive, send)
+
+
 app = Starlette(
     routes=[
         Route("/health", health),
-        Route("/mcp/{secret}", handle_mcp, methods=["POST", "GET"]),
+        Mount(f"/mcp/{MCP_SECRET}", app=mcp_asgi),
     ]
 )
