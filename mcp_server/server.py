@@ -11,8 +11,6 @@ from datetime import datetime, timezone, timedelta
 
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
-from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
@@ -26,7 +24,6 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 IST = timezone(timedelta(hours=5, minutes=30))
-MCP_SECRET = os.environ.get("MCP_SECRET", "")
 BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 if BASE_URL:
     BASE_URL = f"https://{BASE_URL}"
@@ -129,24 +126,6 @@ def list_tasks(assignee: str = "") -> str:
     return "\n".join(lines).strip()
 
 
-# ── Auth middleware (Bearer token) ────────────────────────────────────────────
-
-class BearerAuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Let health and well-known through unauthenticated
-        if request.url.path in ("/health",) or request.url.path.startswith("/.well-known"):
-            return await call_next(request)
-
-        if MCP_SECRET:
-            auth = request.headers.get("Authorization", "")
-            token = auth.removeprefix("Bearer ").strip()
-            if token != MCP_SECRET:
-                return JSONResponse(
-                    {"error": "Unauthorized"},
-                    status_code=401,
-                    headers={"WWW-Authenticate": 'Bearer realm="task-tracker"'},
-                )
-        return await call_next(request)
 
 
 # ── Route handlers ────────────────────────────────────────────────────────────
@@ -174,7 +153,6 @@ async def oauth_authorization_server(request: Request):
 mcp_asgi = mcp.streamable_http_app()
 
 app = Starlette(
-    middleware=[Middleware(BearerAuthMiddleware)],
     routes=[
         Route("/health", health),
         Route("/.well-known/oauth-protected-resource", oauth_protected_resource),
