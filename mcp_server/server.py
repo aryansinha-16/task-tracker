@@ -1,7 +1,7 @@
 """
 Remote MCP server for RK's task tracker.
 Transport: StreamableHTTP via FastMCP
-URL: /mcp/<secret>   (secret-in-path auth; no OAuth)
+Served at: /mcp  (FastMCP internal path also set to /mcp, mounted at root)
 """
 
 import logging
@@ -24,9 +24,7 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 IST = timezone(timedelta(hours=5, minutes=30))
-BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
-if BASE_URL:
-    BASE_URL = f"https://{BASE_URL}"
+MCP_SECRET = os.environ.get("MCP_SECRET", "")
 
 
 def now_ist() -> str:
@@ -34,8 +32,10 @@ def now_ist() -> str:
 
 
 # ── FastMCP server ────────────────────────────────────────────────────────────
+# streamable_http_path="/mcp" means FastMCP's inner Starlette serves at /mcp.
+# We mount that inner app at "/" so no prefix is stripped, and /mcp reaches it intact.
 
-mcp = FastMCP("task-tracker")
+mcp = FastMCP("task-tracker", streamable_http_path="/mcp")
 
 
 @mcp.tool()
@@ -126,8 +126,6 @@ def list_tasks(assignee: str = "") -> str:
     return "\n".join(lines).strip()
 
 
-
-
 # ── Route handlers ────────────────────────────────────────────────────────────
 
 async def health(request: Request):
@@ -135,20 +133,16 @@ async def health(request: Request):
 
 
 async def oauth_protected_resource(request: Request):
-    """Tell clients this resource requires Bearer auth (no OAuth server)."""
-    mcp_url = f"{BASE_URL}/mcp" if BASE_URL else "/mcp"
-    return JSONResponse({
-        "resource": mcp_url,
-        "bearer_methods_supported": ["header"],
-    })
+    return JSONResponse({"resource": "/mcp", "bearer_methods_supported": ["header"]})
 
 
 async def oauth_authorization_server(request: Request):
-    """Return 404-style response — we don't have an OAuth server."""
     return JSONResponse({"error": "not_supported"}, status_code=404)
 
 
 # ── App assembly ──────────────────────────────────────────────────────────────
+# Mount FastMCP's inner app at "/" so it receives full paths (including /mcp).
+# Our own routes for /health and /.well-known are listed first so they win.
 
 mcp_asgi = mcp.streamable_http_app()
 
@@ -158,6 +152,6 @@ app = Starlette(
         Route("/.well-known/oauth-protected-resource", oauth_protected_resource),
         Route("/.well-known/oauth-protected-resource/{path:path}", oauth_protected_resource),
         Route("/.well-known/oauth-authorization-server", oauth_authorization_server),
-        Mount("/mcp", app=mcp_asgi),
+        Mount("/", app=mcp_asgi),
     ],
 )
