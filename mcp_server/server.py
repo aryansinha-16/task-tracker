@@ -244,13 +244,16 @@ def health():
 _sse_queues: dict[str, asyncio.Queue] = {}
 
 
-async def _sse_stream(request: Request) -> StreamingResponse:
+async def _sse_stream(request: Request, secret: str = "") -> StreamingResponse:
     client_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue()
     _sse_queues[client_id] = queue
 
     base = str(request.base_url).rstrip("/")
-    endpoint_url = base + f"/message?client_id={client_id}"
+    if secret:
+        endpoint_url = base + f"/mcp/{secret}/message?client_id={client_id}"
+    else:
+        endpoint_url = base + f"/message?client_id={client_id}"
 
     async def event_stream():
         try:
@@ -294,7 +297,7 @@ async def message_endpoint(request: Request, client_id: str, _=Depends(verify_au
 async def sse_endpoint_secret(secret: str, request: Request):
     if MCP_SECRET and secret != MCP_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return await _sse_stream(request)
+    return await _sse_stream(request, secret=secret)
 
 
 @app.post("/mcp/{secret}/message")
