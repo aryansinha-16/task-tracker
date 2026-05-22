@@ -1,7 +1,6 @@
 """
 Remote MCP server for RK's task tracker.
-Transport: StreamableHTTP via FastMCP
-Served at: /mcp  (FastMCP internal path also set to /mcp, mounted at root)
+Transport: StreamableHTTP via FastMCP (FastMCP app is the top-level ASGI app)
 """
 
 import logging
@@ -10,10 +9,8 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from mcp.server.fastmcp import FastMCP
-from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route, Mount
 
 try:
     from sheets import append_task, update_task_status, list_open_tasks
@@ -24,7 +21,6 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 IST = timezone(timedelta(hours=5, minutes=30))
-MCP_SECRET = os.environ.get("MCP_SECRET", "")
 
 
 def now_ist() -> str:
@@ -32,10 +28,8 @@ def now_ist() -> str:
 
 
 # ── FastMCP server ────────────────────────────────────────────────────────────
-# streamable_http_path="/mcp" means FastMCP's inner Starlette serves at /mcp.
-# We mount that inner app at "/" so no prefix is stripped, and /mcp reaches it intact.
 
-mcp = FastMCP("task-tracker", streamable_http_path="/mcp")
+mcp = FastMCP("task-tracker")
 
 
 @mcp.tool()
@@ -126,32 +120,24 @@ def list_tasks(assignee: str = "") -> str:
     return "\n".join(lines).strip()
 
 
-# ── Route handlers ────────────────────────────────────────────────────────────
+# ── Extra routes (added to FastMCP's own Starlette app so lifespan runs) ──────
 
-async def health(request: Request):
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-async def oauth_protected_resource(request: Request):
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def oauth_protected_resource(request: Request) -> JSONResponse:
     return JSONResponse({"resource": "/mcp", "bearer_methods_supported": ["header"]})
 
 
-async def oauth_authorization_server(request: Request):
+@mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
+async def oauth_authorization_server(request: Request) -> JSONResponse:
     return JSONResponse({"error": "not_supported"}, status_code=404)
 
 
-# ── App assembly ──────────────────────────────────────────────────────────────
-# Mount FastMCP's inner app at "/" so it receives full paths (including /mcp).
-# Our own routes for /health and /.well-known are listed first so they win.
+# ── Top-level ASGI app ────────────────────────────────────────────────────────
+# Use FastMCP's own Starlette app directly so its lifespan/session manager runs.
 
-mcp_asgi = mcp.streamable_http_app()
-
-app = Starlette(
-    routes=[
-        Route("/health", health),
-        Route("/.well-known/oauth-protected-resource", oauth_protected_resource),
-        Route("/.well-known/oauth-protected-resource/{path:path}", oauth_protected_resource),
-        Route("/.well-known/oauth-authorization-server", oauth_authorization_server),
-        Mount("/", app=mcp_asgi),
-    ],
-)
+app = mcp.streamable_http_app()
