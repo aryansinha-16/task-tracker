@@ -69,9 +69,8 @@ def add_task(assignee: str, description: str, due_date: str = "") -> str:
         phone_map = {e["name"].lower(): e["phone"] for e in directory}
         phone = phone_map.get(assignee.lower())
         if phone:
-            due_str_wa = f" | Due: {due_date}" if due_date else ""
-            body_var = f"{assignee}: {description}{due_str_wa}"
-            send_whatsapp_template(phone, "test1", [body_var])
+            due_str_wa = due_date if due_date else "Not set"
+            send_whatsapp_template(phone, "task_assign", [assignee, description, due_str_wa])
             log.info(f"WhatsApp template sent to {assignee} ({phone})")
         else:
             log.warning(f"No phone found for assignee '{assignee}' — WhatsApp not sent")
