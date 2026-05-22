@@ -56,3 +56,38 @@ def send_whatsapp_template(to: str, template_name: str, parameters: list[str], l
             ],
         },
     })
+
+
+def upload_media(pdf_bytes: bytes, filename: str = "tasks.pdf") -> str:
+    """Upload a PDF to WhatsApp media API and return the media_id."""
+    upload_url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/media"
+    resp = requests.post(
+        upload_url,
+        headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
+        files={"file": (filename, pdf_bytes, "application/pdf")},
+        data={"messaging_product": "whatsapp", "type": "application/pdf"},
+        timeout=30,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"WhatsApp media upload error {resp.status_code}: {resp.text}")
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(f"WhatsApp media upload error: {data['error']}")
+    return data["id"]
+
+
+def send_whatsapp_pdf(to: str, pdf_bytes: bytes, filename: str = "tasks.pdf", caption: str = "") -> None:
+    """Upload a PDF and send it as a document message."""
+    media_id = upload_media(pdf_bytes, filename)
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "document",
+        "document": {
+            "id": media_id,
+            "filename": filename,
+        },
+    }
+    if caption:
+        payload["document"]["caption"] = caption
+    _post(payload)

@@ -18,14 +18,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from mcp_server.sheets import list_open_tasks, get_assignee_directory
-from scheduler.digest import (
-    build_rk_digest,
-    build_assignee_digest,
-    build_stale_review_prompt,
-    build_rk_whatsapp,
-    build_assignee_whatsapp,
-)
-from scheduler.whatsapp import send_whatsapp
+from scheduler.digest import build_stale_review_prompt
+from scheduler.pdf import generate_task_pdf, generate_assignee_pdf
+from scheduler.whatsapp import send_whatsapp, send_whatsapp_pdf
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,19 +44,23 @@ def send_daily_digest():
         log.error(f"Failed to fetch data from Google Sheets: {e}")
         return
 
-    # ── RK's master digest ────────────────────────────────────────────
+    # ── RK's master digest (PDF of all tasks) ────────────────────────────────
     if tasks:
-        msg = build_rk_whatsapp(tasks)
+        try:
+            pdf = generate_task_pdf(tasks, title="Daily Task Summary")
+            filename = f"tasks_{today.strftime('%Y%m%d')}.pdf"
+            send_whatsapp_pdf(RK_PHONE, pdf, filename=filename, caption=f"Task Summary — {today.strftime('%d %b %Y')}")
+            log.info(f"Sent PDF digest to RK ({RK_PHONE})")
+        except Exception as e:
+            log.error(f"Failed to send PDF digest to RK: {e}")
     else:
-        msg = f"No open tasks as of {today.strftime('%d %b %Y')}. All clear!"
+        try:
+            send_whatsapp(RK_PHONE, f"No open tasks as of {today.strftime('%d %b %Y')}. All clear!")
+            log.info("Sent all-clear to RK")
+        except Exception as e:
+            log.error(f"Failed to send all-clear to RK: {e}")
 
-    try:
-        send_whatsapp(RK_PHONE, msg)
-        log.info(f"Sent master digest to RK ({RK_PHONE})")
-    except Exception as e:
-        log.error(f"Failed to send WhatsApp digest to RK: {e}")
-
-    # ── Per-assignee digests ─────────────────────────────────────────────────
+    # ── Per-assignee PDF digests ──────────────────────────────────────────────
     grouped: dict[str, list] = {}
     for t in tasks:
         grouped.setdefault(t["assignee"].strip().lower(), []).append(t)
@@ -69,15 +68,18 @@ def send_daily_digest():
     phone_map = {entry["name"].strip().lower(): entry["phone"] for entry in directory}
 
     for assignee_key, assignee_tasks in grouped.items():
-        phone = phone_map.get(assignee_key) or RK_PHONE  # fallback to RK if no phone set
-
+        phone = phone_map.get(assignee_key)
+        if not phone:
+            log.warning(f"No phone for {assignee_key}, skipping")
+            continue
         display_name = assignee_tasks[0]["assignee"]
-        msg = build_assignee_whatsapp(display_name, assignee_tasks)
         try:
-            send_whatsapp(phone, msg)
-            log.info(f"Sent WhatsApp digest to {display_name} ({phone})")
+            pdf = generate_assignee_pdf(display_name, assignee_tasks)
+            filename = f"tasks_{display_name.lower()}_{today.strftime('%Y%m%d')}.pdf"
+            send_whatsapp_pdf(phone, pdf, filename=filename, caption=f"Hi {display_name}, here are your pending tasks.")
+            log.info(f"Sent PDF digest to {display_name} ({phone})")
         except Exception as e:
-            log.error(f"Failed to send WhatsApp to {display_name}: {e}")
+            log.error(f"Failed to send PDF to {display_name}: {e}")
 
     # ── Fortnightly stale task review (every 14 days, triggered if today is the day) ──
     day_of_year = today.timetuple().tm_yday
