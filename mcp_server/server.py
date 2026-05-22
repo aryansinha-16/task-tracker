@@ -20,7 +20,8 @@ except ModuleNotFoundError:
 
 import sys, os as _os
 sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), ".."))
-from scheduler.whatsapp import send_whatsapp_template
+from scheduler.whatsapp import send_whatsapp, send_whatsapp_template
+from scheduler.digest import build_rk_whatsapp, build_assignee_whatsapp
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -140,6 +141,48 @@ def list_tasks(assignee: str = "") -> str:
         lines.append("")
 
     return "\n".join(lines).strip()
+
+
+@mcp.tool()
+def send_digest() -> str:
+    """Send the daily WhatsApp digest to RK and all assignees right now."""
+    RK_PHONE = os.environ.get("RK_PHONE", "916361742805")
+    tasks = list_open_tasks()
+    directory = get_assignee_directory()
+    phone_map = {e["name"].lower(): e["phone"] for e in directory}
+
+    sent = []
+    errors = []
+
+    # RK's master digest
+    msg = build_rk_whatsapp(tasks) if tasks else "No open tasks right now. All clear!"
+    try:
+        send_whatsapp(RK_PHONE, msg)
+        sent.append(f"RK ({RK_PHONE})")
+    except Exception as e:
+        errors.append(f"RK: {e}")
+
+    # Per-assignee digests
+    grouped: dict[str, list] = {}
+    for t in tasks:
+        grouped.setdefault(t["assignee"].strip().lower(), []).append(t)
+
+    for assignee_key, assignee_tasks in grouped.items():
+        phone = phone_map.get(assignee_key)
+        if not phone:
+            errors.append(f"{assignee_key}: no phone found")
+            continue
+        display_name = assignee_tasks[0]["assignee"]
+        try:
+            send_whatsapp(phone, build_assignee_whatsapp(display_name, assignee_tasks))
+            sent.append(f"{display_name} ({phone})")
+        except Exception as e:
+            errors.append(f"{display_name}: {e}")
+
+    result = f"Digest sent to: {', '.join(sent)}" if sent else "No messages sent."
+    if errors:
+        result += f"\nErrors: {'; '.join(errors)}"
+    return result
 
 
 # ── Extra routes (added to FastMCP's own Starlette app so lifespan runs) ──────
