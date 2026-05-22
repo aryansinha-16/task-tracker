@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.streamable_http import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -29,7 +30,10 @@ def now_ist() -> str:
 
 # ── FastMCP server ────────────────────────────────────────────────────────────
 
-mcp = FastMCP("task-tracker")
+mcp = FastMCP(
+    "task-tracker",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 @mcp.tool()
