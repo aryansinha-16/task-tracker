@@ -84,28 +84,56 @@ def build_assignee_digest(assignee_name: str, tasks: list[dict]) -> str:
 
 def build_rk_whatsapp(tasks: list[dict]) -> str:
     today = _today()
-    lines = [f"{today.strftime('%d %b %Y')} — {len(tasks)} open task(s)"]
+    grouped: dict[str, list] = {}
     for t in tasks:
-        age = (today - datetime.strptime(t["date_assigned"], "%Y-%m-%d").date()).days
-        overdue = ""
-        if t.get("due_date") and today > datetime.strptime(t["due_date"], "%Y-%m-%d").date():
-            overdue = " OVERDUE"
-        due_str = f" (due {t['due_date']})" if t.get("due_date") else ""
-        lines.append(f"- {t['assignee']}: {t['description']}{due_str} [{age}d]{overdue}")
-    return "\n".join(lines)
+        grouped.setdefault(t["assignee"], []).append(t)
+
+    lines = [
+        f"📋 *Daily Task Summary — {today.strftime('%d %b %Y')}*",
+        f"*{len(tasks)} open task(s)*",
+        "",
+    ]
+
+    for person, person_tasks in sorted(grouped.items()):
+        lines.append(f"*{person}*")
+        for t in person_tasks:
+            age = (today - datetime.strptime(t["date_assigned"], "%Y-%m-%d").date()).days
+            if t.get("due_date"):
+                due = datetime.strptime(t["due_date"], "%Y-%m-%d").date()
+                overdue = today > due
+                due_str = f" | due {t['due_date']}"
+                flag = " 🔴" if overdue else (" ⚠️" if age >= 3 else "")
+            else:
+                due_str = ""
+                flag = " ⚠️" if age >= 3 else ""
+            lines.append(f"  • {t['description']}{due_str} ({age}d){flag}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
 
 
 def build_assignee_whatsapp(assignee_name: str, tasks: list[dict]) -> str:
     today = _today()
-    lines = [f"Hi {assignee_name}, your pending tasks as of {today.strftime('%d %b %Y')}:"]
+    lines = [
+        f"📌 *Hi {assignee_name}!*",
+        f"Here are your pending tasks as of {today.strftime('%d %b %Y')}:",
+        "",
+    ]
+
     for t in tasks:
         age = (today - datetime.strptime(t["date_assigned"], "%Y-%m-%d").date()).days
-        overdue = ""
-        if t.get("due_date") and today > datetime.strptime(t["due_date"], "%Y-%m-%d").date():
-            overdue = " (OVERDUE)"
-        due_str = f" due {t['due_date']}" if t.get("due_date") else ""
-        lines.append(f"- {t['description']}{due_str} [{age}d]{overdue}")
-    lines.append("Please update RK once done.")
+        if t.get("due_date"):
+            due = datetime.strptime(t["due_date"], "%Y-%m-%d").date()
+            overdue = today > due
+            due_str = f" | due {t['due_date']}"
+            flag = " 🔴 *OVERDUE*" if overdue else ""
+        else:
+            due_str = ""
+            flag = ""
+        lines.append(f"  • {t['description']}{due_str} ({age}d){flag}")
+
+    lines.append("")
+    lines.append("Please update RK once done. 🙏")
     return "\n".join(lines)
 
 
