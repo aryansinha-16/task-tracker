@@ -5,6 +5,7 @@ Sheet schema (row order):
   task_id | assignee | description | date_assigned | due_date | status | closed_date
 """
 
+import json
 import os
 from typing import Optional
 
@@ -19,13 +20,16 @@ SCOPES = [
 SHEET_ID = os.environ["GOOGLE_SHEET_ID"]
 TASKS_TAB = os.environ.get("TASKS_TAB", "Tasks")
 ASSIGNEES_TAB = os.environ.get("ASSIGNEES_TAB", "Assignees")
-CREDS_PATH = os.environ["GOOGLE_CREDS_PATH"]
 
 HEADERS = ["task_id", "assignee", "description", "date_assigned", "due_date", "status", "closed_date"]
 
 
 def _client():
-    creds = Credentials.from_service_account_file(CREDS_PATH, scopes=SCOPES)
+    creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+    if creds_json:
+        creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
+    else:
+        creds = Credentials.from_service_account_file(os.environ["GOOGLE_CREDS_PATH"], scopes=SCOPES)
     return gspread.authorize(creds)
 
 
