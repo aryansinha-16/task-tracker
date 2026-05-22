@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 
 import sys, os as _os
 sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), ".."))
-from scheduler.whatsapp import send_whatsapp
+from scheduler.whatsapp import send_whatsapp_template
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -63,20 +63,16 @@ def add_task(assignee: str, description: str, due_date: str = "") -> str:
         "closed_date": "",
     })
 
-    # Send WhatsApp notification to assignee
+    # Send WhatsApp notification to assignee via template
     try:
         directory = get_assignee_directory()
         phone_map = {e["name"].lower(): e["phone"] for e in directory}
         phone = phone_map.get(assignee.lower())
         if phone:
-            due_line = f"\nDue: {due_date}" if due_date else ""
-            msg = (
-                f"Hi {assignee}, RK has assigned you a new task:\n\n"
-                f"{description}{due_line}\n\n"
-                f"Task ID: {task_id}"
-            )
-            send_whatsapp(phone, msg)
-            log.info(f"WhatsApp sent to {assignee} ({phone})")
+            due_str_wa = f" | Due: {due_date}" if due_date else ""
+            body_var = f"{assignee}: {description}{due_str_wa}"
+            send_whatsapp_template(phone, "test1", [body_var])
+            log.info(f"WhatsApp template sent to {assignee} ({phone})")
         else:
             log.warning(f"No phone found for assignee '{assignee}' — WhatsApp not sent")
     except Exception as e:

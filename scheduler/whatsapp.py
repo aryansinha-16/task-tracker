@@ -1,6 +1,7 @@
 """
-WhatsApp Cloud API sender — uses free-form text messages.
-Requires the recipient to have messaged the business number within the last 24h.
+WhatsApp Cloud API sender.
+- send_whatsapp: free-form text (only works within 24h window)
+- send_whatsapp_template: template message (works anytime)
 """
 
 import os
@@ -11,18 +12,7 @@ PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "1124409430751461")
 API_URL = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
 
 
-def send_whatsapp(to: str, body_text: str) -> None:
-    """
-    Send a free-form WhatsApp text message.
-    `to` must be a phone number with country code, no '+' (e.g. '916361742805').
-    """
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {"body": body_text[:4096]},
-    }
-
+def _post(payload: dict) -> None:
     resp = requests.post(
         API_URL,
         json=payload,
@@ -37,3 +27,32 @@ def send_whatsapp(to: str, body_text: str) -> None:
     data = resp.json()
     if "error" in data:
         raise RuntimeError(f"WhatsApp API error: {data['error']}")
+
+
+def send_whatsapp(to: str, body_text: str) -> None:
+    """Free-form text — requires recipient to have messaged in last 24h."""
+    _post({
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {"body": body_text[:4096]},
+    })
+
+
+def send_whatsapp_template(to: str, template_name: str, parameters: list[str], language: str = "en") -> None:
+    """Send a template message. `parameters` is an ordered list of variable values."""
+    _post({
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": language},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": p} for p in parameters],
+                }
+            ],
+        },
+    })
