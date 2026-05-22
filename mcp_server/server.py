@@ -14,9 +14,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 try:
-    from sheets import append_task, update_task_status, list_open_tasks
+    from sheets import append_task, update_task_status, list_open_tasks, get_assignee_directory
 except ModuleNotFoundError:
-    from mcp_server.sheets import append_task, update_task_status, list_open_tasks
+    from mcp_server.sheets import append_task, update_task_status, list_open_tasks, get_assignee_directory
+
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), ".."))
+from scheduler.whatsapp import send_whatsapp
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -58,6 +62,25 @@ def add_task(assignee: str, description: str, due_date: str = "") -> str:
         "status": "Open",
         "closed_date": "",
     })
+
+    # Send WhatsApp notification to assignee
+    try:
+        directory = get_assignee_directory()
+        phone_map = {e["name"].lower(): e["phone"] for e in directory}
+        phone = phone_map.get(assignee.lower())
+        if phone:
+            due_line = f"\nDue: {due_date}" if due_date else ""
+            msg = (
+                f"Hi {assignee}, RK has assigned you a new task:\n\n"
+                f"{description}{due_line}\n\n"
+                f"Task ID: {task_id}"
+            )
+            send_whatsapp(phone, msg)
+            log.info(f"WhatsApp sent to {assignee} ({phone})")
+        else:
+            log.warning(f"No phone found for assignee '{assignee}' — WhatsApp not sent")
+    except Exception as e:
+        log.error(f"WhatsApp notification failed: {e}")
 
     due_str = f", due {due_date}" if due_date else ""
     return (
