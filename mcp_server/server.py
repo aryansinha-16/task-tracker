@@ -20,7 +20,8 @@ except ModuleNotFoundError:
 
 import sys, os as _os
 sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), ".."))
-from scheduler.whatsapp import send_whatsapp, send_task_assign_notification
+from scheduler.whatsapp import send_whatsapp, send_task_assign_notification, send_whatsapp_image_template, send_whatsapp_rk_template
+from scheduler.image import generate_task_image, generate_assignee_image
 from scheduler.digest import build_rk_whatsapp, build_assignee_whatsapp
 
 log = logging.getLogger(__name__)
@@ -144,22 +145,33 @@ def list_tasks(assignee: str = "") -> str:
 
 @mcp.tool()
 def send_digest() -> str:
-    """Send the daily WhatsApp digest to RK and all assignees right now."""
+    """Send the daily WhatsApp image digest to RK and all assignees right now."""
     RK_PHONE = os.environ.get("RK_PHONE", "916361742805")
+    WA_TEMPLATE_RK    = os.environ.get("WHATSAPP_TEMPLATE_NAME_RK", "rk_task_summary")
+    WA_TEMPLATE_ASSIG = os.environ.get("WHATSAPP_TEMPLATE_NAME", "daily_task_summary")
+
     tasks = list_open_tasks()
     directory = get_assignee_directory()
     phone_map = {e["name"].lower(): e["phone"] for e in directory}
+    date_str = datetime.now(IST).strftime("%d/%m/%Y")
 
     sent = []
     errors = []
 
     # RK's master digest
-    msg = build_rk_whatsapp(tasks) if tasks else "No open tasks right now. All clear!"
-    try:
-        send_whatsapp(RK_PHONE, msg)
-        sent.append(f"RK ({RK_PHONE})")
-    except Exception as e:
-        errors.append(f"RK: {e}")
+    if tasks:
+        try:
+            img = generate_task_image(tasks, title="Daily Task Summary")
+            send_whatsapp_rk_template(RK_PHONE, img, WA_TEMPLATE_RK, date_str=date_str)
+            sent.append(f"RK ({RK_PHONE})")
+        except Exception as e:
+            errors.append(f"RK: {e}")
+    else:
+        try:
+            send_whatsapp(RK_PHONE, "No open tasks right now. All clear!")
+            sent.append(f"RK ({RK_PHONE})")
+        except Exception as e:
+            errors.append(f"RK: {e}")
 
     # Per-assignee digests
     grouped: dict[str, list] = {}
@@ -173,7 +185,8 @@ def send_digest() -> str:
             continue
         display_name = assignee_tasks[0]["assignee"]
         try:
-            send_whatsapp(phone, build_assignee_whatsapp(display_name, assignee_tasks))
+            img = generate_assignee_image(display_name, assignee_tasks)
+            send_whatsapp_image_template(phone, img, WA_TEMPLATE_ASSIG, assignee_name=display_name, date_str=date_str)
             sent.append(f"{display_name} ({phone})")
         except Exception as e:
             errors.append(f"{display_name}: {e}")
