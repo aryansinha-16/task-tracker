@@ -91,3 +91,91 @@ def send_whatsapp_pdf(to: str, pdf_bytes: bytes, filename: str = "tasks.pdf", ca
     if caption:
         payload["document"]["caption"] = caption
     _post(payload)
+
+
+def upload_image(image_bytes: bytes, filename: str = "tasks.png") -> str:
+    """Upload a PNG to WhatsApp media API and return the media_id."""
+    upload_url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/media"
+    resp = requests.post(
+        upload_url,
+        headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
+        files={"file": (filename, image_bytes, "image/png")},
+        data={"messaging_product": "whatsapp", "type": "image/png"},
+        timeout=30,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"WhatsApp image upload error {resp.status_code}: {resp.text}")
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(f"WhatsApp image upload error: {data['error']}")
+    return data["id"]
+
+
+def _send_image_template(to: str, media_id: str, template_name: str, body_params: list[str], language: str = "en") -> None:
+    _post({
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": language},
+            "components": [
+                {
+                    "type": "header",
+                    "parameters": [{"type": "image", "image": {"id": media_id}}],
+                },
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": p} for p in body_params],
+                },
+            ],
+        },
+    })
+
+
+def send_whatsapp_image_template(
+    to: str,
+    image_bytes: bytes,
+    template_name: str,
+    assignee_name: str,
+    date_str: str,
+    language: str = "en",
+) -> None:
+    """Two-variable template: {{1}} = name, {{2}} = date. Used for assignees (daily_task_summary)."""
+    media_id = upload_image(image_bytes)
+    _send_image_template(to, media_id, template_name, [assignee_name, date_str], language)
+
+
+def send_task_assign_notification(to: str, assignee_name: str, description: str, due_date: str, language: str = "en") -> None:
+    """Send task_assign template — no image, text only. {{1}}=name {{2}}=task {{3}}=due date."""
+    _post({
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": "task_assign",
+            "language": {"code": language},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": assignee_name},
+                        {"type": "text", "text": description},
+                        {"type": "text", "text": due_date or "Not set"},
+                    ],
+                }
+            ],
+        },
+    })
+
+
+def send_whatsapp_rk_template(
+    to: str,
+    image_bytes: bytes,
+    template_name: str,
+    date_str: str,
+    language: str = "en",
+) -> None:
+    """One-variable template: {{1}} = date. Used for RK (rk_task_summary)."""
+    media_id = upload_image(image_bytes)
+    _send_image_template(to, media_id, template_name, [date_str], language)

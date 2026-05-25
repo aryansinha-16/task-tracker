@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 
 import sys, os as _os
 sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), ".."))
-from scheduler.whatsapp import send_whatsapp, send_whatsapp_template
+from scheduler.whatsapp import send_whatsapp, send_task_assign_notification
 from scheduler.digest import build_rk_whatsapp, build_assignee_whatsapp
 
 log = logging.getLogger(__name__)
@@ -70,9 +70,8 @@ def add_task(assignee: str, description: str, due_date: str = "") -> str:
         phone_map = {e["name"].lower(): e["phone"] for e in directory}
         phone = phone_map.get(assignee.lower())
         if phone:
-            due_str_wa = due_date if due_date else "Not set"
-            send_whatsapp_template(phone, "task_assign", [assignee, description, due_str_wa])
-            log.info(f"WhatsApp template sent to {assignee} ({phone})")
+            send_task_assign_notification(phone, assignee, description, due_date)
+            log.info(f"WhatsApp task_assign sent to {assignee} ({phone})")
         else:
             log.warning(f"No phone found for assignee '{assignee}' — WhatsApp not sent")
     except Exception as e:
