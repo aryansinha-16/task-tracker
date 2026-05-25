@@ -4,6 +4,7 @@ High-res (2x), clean card design — no avatar icons, no footer.
 """
 
 import io
+import os
 from datetime import datetime, timezone, timedelta
 from PIL import Image, ImageDraw, ImageFont
 
@@ -37,11 +38,21 @@ AVATAR_COLORS = [
 ]
 
 
+_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts")
+
 def _load_font(size: int, bold: bool = False):
-    candidates_bold    = ["arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf",
-                          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
-    candidates_regular = ["arial.ttf", "Arial.ttf", "DejaVuSans.ttf",
-                          "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+    candidates_bold = [
+        os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf"),
+        "arialbd.ttf", "Arial Bold.ttf",
+        "DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    candidates_regular = [
+        os.path.join(_FONT_DIR, "DejaVuSans.ttf"),
+        "arial.ttf", "Arial.ttf",
+        "DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
     for path in (candidates_bold if bold else candidates_regular):
         try:
             return ImageFont.truetype(path, size * SCALE)
