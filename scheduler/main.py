@@ -113,13 +113,13 @@ def main():
         send_daily_digest()
         return
 
-    log.info("Scheduler started. Will send digest at 04:00-04:15 UTC (09:30-09:45 IST) each day.")
+    log.info("Scheduler started. Will send digest at 04:30-04:45 UTC (10:00-10:15 IST) each day.")
     last_run_date = None
 
     while True:
         now_utc = datetime.now(timezone.utc)
         # Fire at 03:30 UTC, but only once per day even if process restarts
-        if now_utc.hour == 4 and 0 <= now_utc.minute <= 15 and last_run_date != now_utc.date():
+        if now_utc.hour == 4 and 30 <= now_utc.minute <= 45 and last_run_date != now_utc.date():
             last_run_date = now_utc.date()
             log.info(f"Firing daily digest for {last_run_date}")
             send_daily_digest()
