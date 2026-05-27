@@ -1,17 +1,16 @@
 """
 Scheduler entry point.
-Runs daily at 9:45 AM IST to send email digests.
+Runs daily at 9:45 AM IST to send WhatsApp digests.
 Also triggers the fortnightly stale-task review.
 
-Deploy on Railway or Render as a long-running process.
+Deployed on Railway as a cron job: 15 4 * * * (09:45 IST daily)
+Run manually: python scheduler/main.py
 """
 
 import logging
 import os
 import sys
-from datetime import datetime, timezone, timedelta
-
-import time
+from datetime import datetime, timedelta, timezone
 
 # Allow imports from parent dirs when running standalone
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -108,26 +107,5 @@ def send_daily_digest():
     log.info("Daily digest run complete.")
 
 
-def main():
-    # If --run-now flag passed (for testing), fire immediately and exit
-    if "--run-now" in sys.argv:
-        log.info("--run-now flag detected, sending digest immediately.")
-        send_daily_digest()
-        return
-
-    log.info("Scheduler started. Will send digest at 04:15-04:29 UTC (09:45-09:59 IST) each day.")
-    last_run_date = None
-
-    while True:
-        now_utc = datetime.now(timezone.utc)
-        # Fire at 04:15 UTC (09:45 IST), but only once per day even if process restarts
-        if now_utc.hour == 4 and 15 <= now_utc.minute <= 29 and last_run_date != now_utc.date():
-            last_run_date = now_utc.date()
-            log.info(f"Firing daily digest for {last_run_date}")
-            send_daily_digest()
-
-        time.sleep(60)
-
-
 if __name__ == "__main__":
-    main()
+    send_daily_digest()
