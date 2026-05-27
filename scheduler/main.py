@@ -1,6 +1,6 @@
 """
 Scheduler entry point.
-Runs daily at 9 AM IST to send email digests.
+Runs daily at 10 AM IST to send email digests.
 Also triggers the fortnightly stale-task review.
 
 Deploy on Railway or Render as a long-running process.
@@ -113,13 +113,13 @@ def main():
         send_daily_digest()
         return
 
-    log.info("Scheduler started. Will send digest at 04:45-05:00 UTC (10:15-10:30 IST) each day.")
+    log.info("Scheduler started. Will send digest at 04:30-04:44 UTC (10:00-10:14 IST) each day.")
     last_run_date = None
 
     while True:
         now_utc = datetime.now(timezone.utc)
-        # Fire at 03:30 UTC, but only once per day even if process restarts
-        if now_utc.hour == 4 and 45 <= now_utc.minute <= 59 and last_run_date != now_utc.date():
+        # Fire at 04:30 UTC (10:00 IST), but only once per day even if process restarts
+        if now_utc.hour == 4 and 30 <= now_utc.minute <= 44 and last_run_date != now_utc.date():
             last_run_date = now_utc.date()
             log.info(f"Firing daily digest for {last_run_date}")
             send_daily_digest()
