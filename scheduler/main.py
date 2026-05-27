@@ -1,6 +1,6 @@
 """
 Scheduler entry point.
-Runs daily at 10 AM IST to send email digests.
+Runs daily at 9:45 AM IST to send email digests.
 Also triggers the fortnightly stale-task review.
 
 Deploy on Railway or Render as a long-running process.
@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 RK_PHONE          = os.environ.get("RK_PHONE", "916361742805")
+RK_PHONE_2        = os.environ.get("RK_PHONE_2", "")
 WA_TEMPLATE_RK    = os.environ.get("WHATSAPP_TEMPLATE_NAME_RK", "rk_task_summary")
 WA_TEMPLATE_ASSIG = os.environ.get("WHATSAPP_TEMPLATE_NAME", "daily_task_summary")
 
@@ -48,22 +49,22 @@ def send_daily_digest():
     date_str = today.strftime("%d/%m/%Y")
 
     # ── RK's master digest (image of all tasks) ───────────────────────────────
+    rk_phones = [p for p in [RK_PHONE, RK_PHONE_2] if p]
     if tasks:
-        try:
-            img = generate_task_image(tasks, title="Daily Task Summary")
-            send_whatsapp_rk_template(
-                RK_PHONE, img, WA_TEMPLATE_RK,
-                date_str=date_str,
-            )
-            log.info(f"Sent image digest to RK ({RK_PHONE})")
-        except Exception as e:
-            log.error(f"Failed to send image digest to RK: {e}")
+        img = generate_task_image(tasks, title="Daily Task Summary")
+        for phone in rk_phones:
+            try:
+                send_whatsapp_rk_template(phone, img, WA_TEMPLATE_RK, date_str=date_str)
+                log.info(f"Sent image digest to RK ({phone})")
+            except Exception as e:
+                log.error(f"Failed to send image digest to RK ({phone}): {e}")
     else:
-        try:
-            send_whatsapp(RK_PHONE, f"No open tasks as of {today.strftime('%d %b %Y')}. All clear!")
-            log.info("Sent all-clear to RK")
-        except Exception as e:
-            log.error(f"Failed to send all-clear to RK: {e}")
+        for phone in rk_phones:
+            try:
+                send_whatsapp(phone, f"No open tasks as of {today.strftime('%d %b %Y')}. All clear!")
+                log.info(f"Sent all-clear to RK ({phone})")
+            except Exception as e:
+                log.error(f"Failed to send all-clear to RK ({phone}): {e}")
 
     # ── Per-assignee image digests ────────────────────────────────────────────
     grouped: dict[str, list] = {}
@@ -97,11 +98,12 @@ def send_daily_digest():
         ]
         if stale:
             prompt = build_stale_review_prompt(stale)
-            try:
-                send_whatsapp(RK_PHONE, prompt)
-                log.info(f"Sent stale task review prompt ({len(stale)} tasks)")
-            except Exception as e:
-                log.error(f"Failed to send stale review WhatsApp: {e}")
+            for phone in rk_phones:
+                try:
+                    send_whatsapp(phone, prompt)
+                    log.info(f"Sent stale task review prompt to {phone} ({len(stale)} tasks)")
+                except Exception as e:
+                    log.error(f"Failed to send stale review WhatsApp to {phone}: {e}")
 
     log.info("Daily digest run complete.")
 
@@ -113,13 +115,13 @@ def main():
         send_daily_digest()
         return
 
-    log.info("Scheduler started. Will send digest at 04:30-04:44 UTC (10:00-10:14 IST) each day.")
+    log.info("Scheduler started. Will send digest at 04:15-04:29 UTC (09:45-09:59 IST) each day.")
     last_run_date = None
 
     while True:
         now_utc = datetime.now(timezone.utc)
-        # Fire at 04:30 UTC (10:00 IST), but only once per day even if process restarts
-        if now_utc.hour == 4 and 30 <= now_utc.minute <= 44 and last_run_date != now_utc.date():
+        # Fire at 04:15 UTC (09:45 IST), but only once per day even if process restarts
+        if now_utc.hour == 4 and 15 <= now_utc.minute <= 29 and last_run_date != now_utc.date():
             last_run_date = now_utc.date()
             log.info(f"Firing daily digest for {last_run_date}")
             send_daily_digest()
